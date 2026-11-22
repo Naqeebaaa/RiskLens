@@ -7,13 +7,13 @@
 // 5. Findings collect karke return karna.
 
 import type { Transaction } from "../../schemas/transaction.schema.js";
-import type { RuleFinding } from "../types/findings.js";
+import type { DetectionFinding  } from "../types/findings.js";
 import { buildRuleContext } from "./build-rule-context.js";
 import { createRuleEngine } from "../engine/register-rules.js";
 
 export async function runDetection(
     transaction: Transaction
-): Promise<RuleFinding[]> {
+): Promise<DetectionFinding[]> {
 
     const accountIds =  //accountIds ek array hai, taake hum baad mein loop chala kar har account ka separate context build kar sakein.
     //avaScript ka Ternary Operator
@@ -28,7 +28,7 @@ export async function runDetection(
     ];
 
     const ruleEngine = createRuleEngine();
-const findings: RuleFinding[] = [];
+const findings: DetectionFinding[] = [];
 
 for (const accountId of accountIds) {
   // Har account par operation perform hoga
@@ -45,7 +45,12 @@ const context = await buildRuleContext(transaction, accountId);
 //accountFindings = sirf current account ki findings.
 //findings = sab accounts ki combined findings.
 const accountFindings = ruleEngine.execute(context);
-findings.push(...accountFindings);
+findings.push(...accountFindings.map((finding ) => ({
+    ...finding,
+    accountId,
+   transactionId: transaction.id,
+}))
+);
 //findings = [...] → new array assign karne ki koshish.
 //findings.push(...) → existing array mein new findings add karna.
 }

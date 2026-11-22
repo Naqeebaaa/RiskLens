@@ -15,16 +15,35 @@ import {
 import { storeTransaction } from "../services/transaction-storage.js";
 import { publishRetry, publishToDLQ, } from "../producer/retry-publisher.js";
 import { runDetection } from "../detection/services/run-detection.js";
-
+import { calculateRiskScores } from "../detection/risk/risk-scoring.service.js";
+import { persistAlerts } from "../alerts/alert-persistence.service.js";
 
 async function processTransaction(transaction: Transaction) {
   console.log("Processing transaction:", transaction);
   if (env.SIMULATE_PROCESSING_FAILURE) {
     throw new Error("Simulated processing failure");
   }
-  const findings = await runDetection(transaction);
-  console.log("Detection findings:", findings);
-  return findings;
+
+const findings = await runDetection(transaction);
+console.log("Detection findings:", findings);
+const accountRisks = calculateRiskScores(findings);
+
+console.log("Account risk scores:", accountRisks);
+
+const alertCandidates = accountRisks.filter(
+  (risk) =>
+    risk.riskLevel === "MEDIUM" ||
+    risk.riskLevel === "HIGH" ||
+    risk.riskLevel === "CRITICAL"
+);
+
+console.log("Alert candidates:", alertCandidates);
+
+return {
+  findings,
+  accountRisks,
+  alertCandidates,
+};
 }
 
 //Promise<string> means this async function will eventually give us a string — the RabbitMQ consumer tag
@@ -113,13 +132,22 @@ await setupRetryInfrastructure(channel);
           return;
         }
         // Step 4: Process the transaction
-        await processTransaction(parsedTransaction);
+const processingResult = await processTransaction(parsedTransaction);
+console.log("Processing completed:", processingResult); 
+//processTransaction() is now returing 3 things findings, accountRisks, alertCandidates
 
         // Step 5: Persist transaction in PostgreSQL
-        await storeTransaction(parsedTransaction);
+await storeTransaction(parsedTransaction);
 
-        // Step 6: Mark it as successfully processed in Redis
-        await markTransactionProcessed(parsedTransaction.id);
+// Step 6: Persist alert candidates in PostgreSQL
+const insertedAlerts = await persistAlerts(
+  processingResult.alertCandidates
+);
+
+console.log(`New alerts persisted: ${insertedAlerts}`);
+
+// Step 7: Mark it as successfully processed in Redis
+await markTransactionProcessed(parsedTransaction.id);
         await releaseTransactionClaim(
           parsedTransaction.id,
           claimToken
@@ -170,3 +198,11 @@ await setupRetryInfrastructure(channel);
       console.log("RiskLens transaction consumer is listening...");
       return result.consumerTag;
 }
+
+
+//order is:
+// Detection + Risk Scoring — alert candidates generate.
+// Transaction Persistence — transaction database mein save.
+// Alert Persistence — alert transaction ko reference karke save.
+// Redis Processed Marker — successful processing record.
+// RabbitMQ ACK — message acknowledge.
