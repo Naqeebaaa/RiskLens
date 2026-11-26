@@ -8,6 +8,7 @@ const validTx = {
   amount: "9500.00",
   currency: "USD",
   timestamp: "2026-11-12T10:00:00.000Z",
+   transactionType: "TRANSFER",
 };
 
 describe("Transaction amount validation", () => {
